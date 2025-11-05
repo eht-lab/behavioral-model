@@ -104,3 +104,6 @@ VERSION-build
 
 core
 vgcore*
+
+.vscode
+patch

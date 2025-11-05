@@ -8,4 +8,4 @@ if COND_PI
 MAYBE_SECONDARY_TARGETS += simple_switch_grpc
 endif
 
-SUBDIRS = test_utils simple_switch psa_switch pna_nic $(MAYBE_SECONDARY_TARGETS)
+SUBDIRS = test_utils simple_switch psa_switch tuna_nic pna_nic $(MAYBE_SECONDARY_TARGETS)
