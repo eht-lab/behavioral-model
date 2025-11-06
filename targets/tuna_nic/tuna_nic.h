@@ -220,6 +220,8 @@ class TunaNic : public Switch {
   static constexpr port_t TUNA_PORT_RECIRCULATE = 0xfffffffa;
   static constexpr port_t TUNA_PORT_RX = 0; // net -> host
   static constexpr port_t TUNA_PORT_TX = 1; // host -> net
+  static constexpr size_t buffer_capacity = 64;
+  static constexpr size_t ecn_threshlod = buffer_capacity / 2;
   static packet_id_t packet_id;
 
   class MirroringSessions;

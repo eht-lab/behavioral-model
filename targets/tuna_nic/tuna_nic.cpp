@@ -121,16 +121,16 @@ TunaNic::TunaNic(bool enable_swap)
   : Switch(enable_swap),
 #ifdef SSWITCH_PRIORITY_QUEUEING_ON
     ingress_buffer(nb_ingress_threads,
-                   64, IngressThreadMapper(nb_ingress_threads),
+                   buffer_capacity, IngressThreadMapper(nb_ingress_threads),
                    SSWITCH_PRIORITY_QUEUEING_NB_QUEUES),
     egress_buffer(nb_egress_threads,
-                   64, EgressThreadMapper(nb_egress_threads),
+                   buffer_capacity, EgressThreadMapper(nb_egress_threads),
                    SSWITCH_PRIORITY_QUEUEING_NB_QUEUES),
 #else
     ingress_buffer(nb_ingress_threads,
-                   64, IngressThreadMapper(nb_ingress_threads)),
+                   buffer_capacity, IngressThreadMapper(nb_ingress_threads)),
     egress_buffer(nb_egress_threads,
-                   64, EgressThreadMapper(nb_egress_threads)),
+                   buffer_capacity, EgressThreadMapper(nb_egress_threads)),
 #endif
     // https://stackoverflow.com/questions/32030141/is-this-incorrect-use-of-stdbind-or-a-compiler-bug
     my_transmit_fn([this](port_t port_num, packet_id_t pkt_id,
@@ -147,29 +147,39 @@ TunaNic::TunaNic(bool enable_swap)
 
   add_required_field("tuna_ingress_input_metadata", "packet_path");
   add_required_field("tuna_ingress_input_metadata", "recircle_timestamp");
-  add_required_field("tuna_egress_input_metadata", "instance");
 
-  add_required_field("tuna_output_metadata", "drop");
-  add_required_field("tuna_output_metadata", "len");
-  add_required_field("tuna_output_metadata", "multicast_group");
-  add_required_field("tuna_output_metadata", "clone_session_id");
-  add_required_field("tuna_output_metadata", "clone");
-  add_required_field("tuna_output_metadata", "resubmit");
-  add_required_field("tuna_output_metadata", "class_of_service");
+  add_required_field("tuna_ingress_output_metadata", "drop");
+  add_required_field("tuna_ingress_output_metadata", "len");
+  add_required_field("tuna_ingress_output_metadata", "multicast_group");
+  add_required_field("tuna_ingress_output_metadata", "clone_session_id");
+  add_required_field("tuna_ingress_output_metadata", "clone");
+  add_required_field("tuna_ingress_output_metadata", "resubmit");
+  add_required_field("tuna_ingress_output_metadata", "class_of_service");
+  add_required_field("tuna_ingress_output_metadata", "port");
+  add_required_field("tuna_ingress_output_metadata", "ecn");
 
-  add_required_field("tuna_output_metadata", "port");
   add_required_field("tuna_egress_parser_input_metadata", "packet_path");
 
+  add_required_field("tuna_egress_input_metadata", "instance");
   add_required_field("tuna_egress_input_metadata", "packet_path");
   add_required_field("tuna_egress_input_metadata", "recircle_timestamp");
+
+  add_required_field("tuna_egress_output_metadata", "drop");
+  add_required_field("tuna_egress_output_metadata", "len");
+  add_required_field("tuna_egress_output_metadata", "multicast_group");
+  add_required_field("tuna_egress_output_metadata", "clone_session_id");
+  add_required_field("tuna_egress_output_metadata", "clone");
+  add_required_field("tuna_egress_output_metadata", "resubmit");
+  add_required_field("tuna_egress_output_metadata", "class_of_service");
+  add_required_field("tuna_egress_output_metadata", "port");
 
   // 强制算术头处理
   force_arith_header("tuna_ingress_parser_input_metadata");
   force_arith_header("tuna_ingress_input_metadata");
-  force_arith_header("tuna_output_metadata");
+  force_arith_header("tuna_ingress_output_metadata");
   force_arith_header("tuna_egress_parser_input_metadata");
   force_arith_header("tuna_egress_input_metadata");
-  // force_arith_header("tuna_ingress_output_metadata");  // 字段不存在，注释掉
+  force_arith_header("tuna_egress_output_metadata");
 
   import_primitives();
   import_counters();
@@ -382,11 +392,12 @@ TunaNic::ingress_thread(size_t worker_id) {
     phv->get_field("tuna_ingress_input_metadata.recircle_timestamp").set(0);
 
     // set default metadata values according to PSA specification
-    phv->get_field("tuna_output_metadata.drop").set(0);
-    phv->get_field("tuna_output_metadata.len").set(phv->get_field("tuna_ingress_input_metadata.packet_length").get_uint());
-    phv->get_field("tuna_output_metadata.multicast_group").set(0);
-    phv->get_field("tuna_output_metadata.clone").set(0);
-    phv->get_field("tuna_output_metadata.clone_session_id").set(0);
+    phv->get_field("tuna_ingress_output_metadata.drop").set(0);
+    phv->get_field("tuna_ingress_output_metadata.len").set(
+      phv->get_field("tuna_ingress_input_metadata.packet_length").get_uint());
+    phv->get_field("tuna_ingress_output_metadata.multicast_group").set(0);
+    phv->get_field("tuna_ingress_output_metadata.clone").set(0);
+    phv->get_field("tuna_ingress_output_metadata.clone_session_id").set(0);
 
     Pipeline *ingress_mau = this->get_pipeline("ingress");
     ingress_mau->apply(packet.get());
@@ -394,13 +405,21 @@ TunaNic::ingress_thread(size_t worker_id) {
     Deparser *deparser = this->get_deparser("ingress");
     deparser->deparse(packet.get());
 
-    auto drop = phv->get_field("tuna_output_metadata.drop").get_uint();
+    auto drop = phv->get_field("tuna_ingress_output_metadata.drop").get_uint();
     if (drop) {
       BMLOG_DEBUG_PKT(*packet, "Dropping packet at the end of ingress");
       continue;
     }
 
-    auto mgid = phv->get_field("tuna_output_metadata.multicast_group").get_uint();
+    auto ecn = phv->get_field("tuna_ingress_output_metadata.ecn").get_uint();
+    if (ecn == 1 || ecn == 2) {
+      if (ingress_buffer.size(port) > ecn_threshlod) {
+        phv->get_field("tuna_ingress_output_metadata.ecn").set(3);
+        BMLOG_DEBUG_PKT(*packet, "Congestion experienced, set output_metadata.ecn to 3(CE)");
+      }
+    }
+
+    auto mgid = phv->get_field("tuna_ingress_output_metadata.multicast_group").get_uint();
     if (mgid != 0) {
       BMLOG_DEBUG_PKT(*packet, "Multicast requested for packet with multicast group {}", mgid);
       multicast(packet.get(), mgid);
@@ -409,10 +428,10 @@ TunaNic::ingress_thread(size_t worker_id) {
 
     // ingress cloning - each cloned packet is a copy of the packet as it entered the ingress parser
     //                 - dropped packets should still be cloned - do not move below drop
-    auto clone = phv->get_field("tuna_output_metadata.clone").get_uint();
+    auto clone = phv->get_field("tuna_ingress_output_metadata.clone").get_uint();
     if (clone) {
       MirroringSessionConfig config;
-      auto clone_session_id = phv->get_field("tuna_output_metadata.clone_session_id").get<mirror_id_t>();
+      auto clone_session_id = phv->get_field("tuna_ingress_output_metadata.clone_session_id").get<mirror_id_t>();
       auto is_session_configured = mirroring_get_session(clone_session_id, &config);
 
       if (is_session_configured) {
@@ -481,7 +500,7 @@ TunaNic::egress_thread(size_t worker_id) {
 
     // default egress output values according to PSA spec
     // clone_session_id is undefined by default
-    phv->get_field("tuna_output_metadata.drop").set(0);
+    phv->get_field("tuna_egress_output_metadata.drop").set(0);
 
     Pipeline *egress_mau = this->get_pipeline("egress");
     egress_mau->apply(packet.get());
@@ -491,7 +510,7 @@ TunaNic::egress_thread(size_t worker_id) {
 
     // 检查 drop
     // egress cloning - each cloned packet is a copy of the packet as output by the egress deparser
-    auto drop = phv->get_field("tuna_output_metadata.drop").get_uint();
+    auto drop = phv->get_field("tuna_egress_output_metadata.drop").get_uint();
     if (drop) {
       BMLOG_DEBUG_PKT(*packet, "Dropping packet at the end of egress");
       continue;
