@@ -36,6 +36,7 @@ class TUNA_Counter : public bm::ExternType {
   BM_EXTERN_ATTRIBUTES {
     BM_EXTERN_ATTRIBUTE_ADD(n_counters);
     BM_EXTERN_ATTRIBUTE_ADD(type);
+    BM_EXTERN_ATTRIBUTE_ADD(index_mode);
   }
 
   void init() override {
@@ -58,6 +59,7 @@ class TUNA_Counter : public bm::ExternType {
  private:
   Data n_counters;
   Data type;
+  std::string index_mode;
   std::unique_ptr<CounterArray> _counter;
 };
 

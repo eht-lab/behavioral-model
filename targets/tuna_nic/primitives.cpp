@@ -155,9 +155,7 @@ REGISTER_PRIMITIVE(generate_digest);
 
 class add_header : public ActionPrimitive<Header &> {
   void operator ()(Header &hdr) {
-    // TODO(antonin): reset header to 0?
     if (!hdr.is_valid()) {
-      hdr.reset();
       hdr.mark_valid();
       // updated the length packet register (register 0)
       auto &packet = get_packet();

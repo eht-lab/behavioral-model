@@ -47,7 +47,25 @@ namespace tuna {
 
 void
 TUNA_Hash::init() {
-  calc = CalculationsMap::get_instance()->get_copy(algo);
+  if (algorithm == "crc32" || algorithm == "crc32_1edc6f41") algorithm = "crc32_custom";
+  calc = CalculationsMap::get_instance()->get_copy(algorithm);
+
+  if (!calc) return;
+  if (algorithm == "toeplitz") {
+    static const unsigned char raw_key[] = {
+      0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
+      0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
+      0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
+      0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
+      0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa,
+    };
+    const ToeplitzMgr::key_t default_key(
+      reinterpret_cast<const char *>(raw_key), sizeof(raw_key));
+    ToeplitzMgr::update_key(calc.get(), default_key);
+  } else if (algorithm == "crc32_custom") {
+    CustomCrcMgr<uint32_t>::update_config(calc.get(),
+      {polynomial.get_uint(), 0xffffffff, 0xffffffff, true, true});
+  }
 }
 
 void

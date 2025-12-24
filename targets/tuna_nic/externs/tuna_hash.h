@@ -32,7 +32,8 @@ class TUNA_Hash : public bm::ExternType {
  public:
 
   BM_EXTERN_ATTRIBUTES {
-    BM_EXTERN_ATTRIBUTE_ADD(algo);
+    BM_EXTERN_ATTRIBUTE_ADD(algorithm);
+    BM_EXTERN_ATTRIBUTE_ADD(polynomial);
   }
 
   void init() override;
@@ -44,7 +45,8 @@ class TUNA_Hash : public bm::ExternType {
   uint64_t compute(const char *buffer, size_t s);
 
  private:
-  std::string algo;
+  std::string algorithm;
+  Data polynomial;
   std::unique_ptr<bm::CalculationsMap::MyC> calc;
 
 };
